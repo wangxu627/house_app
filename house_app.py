@@ -1,8 +1,11 @@
-from playwright.async_api import async_playwright
+import json
 import asyncio
-from collections import Counter
+import datetime
 from urllib.parse import urlparse, parse_qs
+from collections import Counter
+
 import requests
+from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 
 ENTRY_URL = "https://zw.cdzjryb.com/zwdt/SCXX/Default.aspx?action=ucSCXXShowNew"
@@ -60,14 +63,16 @@ def get_entry_params(name, excluded_types=["商业", "车位"]):
         if response.status_code == 200:
             html_content = response.text
             soup = BeautifulSoup(html_content, 'html.parser')
-            rows = soup.find_all('tr')
+            table = soup.find('table', id='ID_ucSCXXShowNew_gridView')
+            rows = table.find_all('tr')
             params = []
-            for row in rows:
+            for row in rows[1:]:
                 cells = row.find_all('td')
                 if len(cells) >= 2:
-                    type_td = cells[4]
-                    type_td_text = type_td.get_text(strip=True)
-                    print(type_td_text)
+                    number = cells[0].find("input").get('value')
+                    type_td_text = cells[4].get_text(strip=True)
+                    area = cells[6].get_text(strip=True)
+                    release_date = cells[7].get_text(strip=True)
                     second_last_td = cells[-2]
                     link_tag = second_last_td.find('a')
                     if link_tag and type_td_text not in excluded_types:
@@ -76,7 +81,7 @@ def get_entry_params(name, excluded_types=["商业", "车位"]):
                         query_params = parsed_url.query
                         params_dict = parse_qs(query_params)
                         param_value = params_dict.get('param', [None])[0]
-                        params.append(param_value)
+                        params.append([param_value, number, type_td_text, area, release_date])
             return params
     return []
 
@@ -139,7 +144,6 @@ class AsyncWebReq:
         if self.page is None:
             await self.init_browser()
         result = await self.page.evaluate('''(params) => {
-            // 在浏览器上下文中执行的 JavaScript 代码
             function getUnoToken(urlParam) {
                 let regionCode = '';
                 let ids = [];
@@ -172,13 +176,10 @@ class AsyncWebReq:
             await self.playwright.stop()
 
 
-
-async def main():
-    decryptor = AsyncWebReq()
-    await decryptor.init_browser()
-
-    name = "保利和颂"
-    params = get_entry_params(name)
+async def get_counter(decryptor, name):
+    release_items = get_entry_params(name)
+    params = [sublist[0] for sublist in release_items]
+    print(release_items)
     tokens = await decryptor.uno_token(params)
     floor_params = []
     for idx, token in enumerate(tokens):
@@ -186,7 +187,7 @@ async def main():
         for hu in hno_and_uno:
             hno = hu[0]
             uno = hu[1]
-            floor_params.append([params[idx], hno, uno])
+            floor_params.append([params[idx], hno, uno, release_items[idx]])
 
     tokens = await decryptor.floor_token(floor_params)
     total_counter = Counter({})
@@ -195,8 +196,75 @@ async def main():
         counter = Counter([await decryptor.aes_decrypt(single) for single in room_status])
         print(f'{floor[1]}-{floor[2]}: {counter}')
         total_counter += counter
-    print(total_counter)
+        insert_mongo_single(name, counter, floor[1], floor[2], floor[3])
+    return total_counter
 
+
+def insert_mongo_single(name, counter, hall_number, unit_number, info):
+    from mongoengine import connect, Document, IntField, StringField, DateTimeField, FloatField, DynamicField
+    connect(host="mongodb://router.wxioi.fun:27017/available_house")
+
+    class SingleCount(Document):
+        name = StringField(required=True)
+
+        available_count = IntField()
+        sold_count = IntField()
+        other_count = IntField()
+        counter_info = StringField()
+        hall_number = DynamicField()
+        unit_number = DynamicField()
+        release_number = StringField()
+        house_type = StringField()
+        area = FloatField()
+        release_date = DateTimeField()
+        created_date = DateTimeField(default=datetime.datetime.utcnow)
+
+    excluded_elements = {'已售', '可售'}
+    available_count = counter["可售"]
+    sold_count = counter["已售"]
+    other_count = sum(count for item, count in counter.items() if item not in excluded_elements)
+    doc = SingleCount(name=name,
+                      available_count=available_count,
+                      sold_count=sold_count,
+                      other_count=other_count,
+                      counter_info=json.dumps(counter, ensure_ascii=False),
+                      hall_number=hall_number,
+                      unit_number=unit_number,
+                      release_number=info[1],
+                      release_date=info[4],
+                      area=info[3],
+                      house_type=info[2])
+    doc.save()
+
+
+def insert_mongo_total(name, counter):
+    from mongoengine import connect, Document, IntField, StringField, DateTimeField
+    connect(host="mongodb://router.wxioi.fun:27017/available_house")
+
+    class TotalCount(Document):
+        name = StringField(required=True)
+        available_count = IntField()
+        sold_count = IntField()
+        other_count = IntField()
+        counter_info = StringField()
+        created_date = DateTimeField(default=datetime.datetime.utcnow)
+
+    excluded_elements = {'已售', '可售'}
+    available_count = counter["可售"]
+    sold_count = counter["已售"]
+    other_count = sum(count for item, count in counter.items() if item not in excluded_elements)
+    doc = TotalCount(name=name, available_count=available_count, sold_count=sold_count,
+                     other_count=other_count, counter_info=json.dumps(counter, ensure_ascii=False))
+    doc.save()
+
+
+async def main():
+    decryptor = AsyncWebReq()
+    await decryptor.init_browser()
+
+    for name in ["保利和颂", "保利天府瑧悦花园", "锦粼观邸", "阅天府", "越秀曦悦府", "人居越秀和樾林语花园", "人居越秀鹿溪樾府小区"]:
+        total_counter = await get_counter(decryptor, name)
+        insert_mongo_total(name, total_counter)
 
 
 if __name__ == '__main__':
