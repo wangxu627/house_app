@@ -8,6 +8,7 @@ import requests
 from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 
+MONGODB_URI = "mongodb://rabbitlbj:wx*123456789@router.wxioi.fun:27017/?retryWrites=true&loadBalanced=false&serverSelectionTimeoutMS=5000&connectTimeoutMS=10000&authSource=admin&authMechanism=SCRAM-SHA-256"
 ENTRY_URL = "https://zw.cdzjryb.com/zwdt/SCXX/Default.aspx?action=ucSCXXShowNew"
 FLOOR_ESTATE_OF_VIEWS_URL = "https://zw.cdzjryb.com/house-one2one/one2one/getFloorEstateOfViews"
 HNO_AND_UNO_URL = "https://zw.cdzjryb.com/house-one2one/one2one/getHnoAndUnos"
@@ -202,7 +203,7 @@ async def get_counter(decryptor, name):
 
 def insert_mongo_single(name, counter, hall_number, unit_number, info):
     from mongoengine import connect, Document, IntField, StringField, DateTimeField, FloatField, DynamicField
-    connect(host="mongodb://router.wxioi.fun:27017/available_house")
+    connect(host=MONGODB_URI, db="available_house")
 
     class SingleCount(Document):
         name = StringField(required=True)
@@ -239,8 +240,8 @@ def insert_mongo_single(name, counter, hall_number, unit_number, info):
 
 def insert_mongo_total(name, counter):
     from mongoengine import connect, Document, IntField, StringField, DateTimeField
-    connect(host="mongodb://router.wxioi.fun:27017/available_house")
-
+    connect(host=MONGODB_URI, db="available_house")
+    
     class TotalCount(Document):
         name = StringField(required=True)
         available_count = IntField()
