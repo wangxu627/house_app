@@ -7,6 +7,8 @@ from collections import Counter
 import requests
 from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
+from pypinyin import pinyin, Style
+from mongoengine import connect, Document, IntField, StringField, DateTimeField, FloatField, DynamicField, ReferenceField
 
 MONGODB_URI = "mongodb://rabbitlbj:wx*123456789@router.wxioi.fun:27017/?retryWrites=true&loadBalanced=false&serverSelectionTimeoutMS=5000&connectTimeoutMS=10000&authSource=admin&authMechanism=SCRAM-SHA-256"
 ENTRY_URL = "https://zw.cdzjryb.com/zwdt/SCXX/Default.aspx?action=ucSCXXShowNew"
@@ -16,6 +18,38 @@ JS_URL = "https://zw.cdzjryb.com/roompricezjw/index.html?param=859DC59854A66F4A3
 headers = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 }
+
+
+class TotalCount(Document):
+    name = StringField(required=True)
+    pinyin_name = StringField(required=True)
+    available_count = IntField()
+    sold_count = IntField()
+    other_count = IntField()
+    counter_info = StringField()
+    created_date = DateTimeField(default=datetime.datetime.utcnow)
+
+
+class SingleCount(Document):
+    name = StringField(required=True)
+    pinyin_name = StringField(required=True)
+    available_count = IntField()
+    sold_count = IntField()
+    other_count = IntField()
+    counter_info = StringField()
+    hall_number = DynamicField()
+    unit_number = DynamicField()
+    release_number = StringField()
+    house_type = StringField()
+    area = FloatField()
+    release_date = DateTimeField()
+    created_date = DateTimeField(default=datetime.datetime.utcnow)
+    total_ref = ReferenceField(TotalCount)
+
+
+def chinese_to_pinyin(text):
+    pinyin_list = pinyin(text, style=Style.NORMAL)
+    return ''.join([item[0] for item in pinyin_list])
 
 
 def get_viewstate(soup):
@@ -192,39 +226,25 @@ async def get_counter(decryptor, name):
 
     tokens = await decryptor.floor_token(floor_params)
     total_counter = Counter({})
+    single_counters = []
     for floor, token in zip(floor_params, tokens):
         room_status = get_floor_estate_of_views(token)
         counter = Counter([await decryptor.aes_decrypt(single) for single in room_status])
         print(f'{floor[1]}-{floor[2]}: {counter}')
         total_counter += counter
-        insert_mongo_single(name, counter, floor[1], floor[2], floor[3])
-    return total_counter
+        single_counters.append([counter, {'house_number': floor[1], 'unit_number': floor[2], "info": floor[3]}])
+    return total_counter, single_counters
 
 
-def insert_mongo_single(name, counter, hall_number, unit_number, info):
-    from mongoengine import connect, Document, IntField, StringField, DateTimeField, FloatField, DynamicField
+def insert_mongo_single(name, counter, hall_number, unit_number, info, total_ref):
     connect(host=MONGODB_URI, db="available_house")
-
-    class SingleCount(Document):
-        name = StringField(required=True)
-
-        available_count = IntField()
-        sold_count = IntField()
-        other_count = IntField()
-        counter_info = StringField()
-        hall_number = DynamicField()
-        unit_number = DynamicField()
-        release_number = StringField()
-        house_type = StringField()
-        area = FloatField()
-        release_date = DateTimeField()
-        created_date = DateTimeField(default=datetime.datetime.utcnow)
 
     excluded_elements = {'已售', '可售'}
     available_count = counter["可售"]
     sold_count = counter["已售"]
     other_count = sum(count for item, count in counter.items() if item not in excluded_elements)
     doc = SingleCount(name=name,
+                      pinyin_name=chinese_to_pinyin(name),
                       available_count=available_count,
                       sold_count=sold_count,
                       other_count=other_count,
@@ -234,29 +254,22 @@ def insert_mongo_single(name, counter, hall_number, unit_number, info):
                       release_number=info[1],
                       release_date=info[4],
                       area=info[3],
-                      house_type=info[2])
+                      house_type=info[2],
+                      total_ref=total_ref)
     doc.save()
 
 
 def insert_mongo_total(name, counter):
-    from mongoengine import connect, Document, IntField, StringField, DateTimeField
     connect(host=MONGODB_URI, db="available_house")
-    
-    class TotalCount(Document):
-        name = StringField(required=True)
-        available_count = IntField()
-        sold_count = IntField()
-        other_count = IntField()
-        counter_info = StringField()
-        created_date = DateTimeField(default=datetime.datetime.utcnow)
 
     excluded_elements = {'已售', '可售'}
     available_count = counter["可售"]
     sold_count = counter["已售"]
     other_count = sum(count for item, count in counter.items() if item not in excluded_elements)
-    doc = TotalCount(name=name, available_count=available_count, sold_count=sold_count,
+    doc = TotalCount(name=name, pinyin_name=chinese_to_pinyin(name), available_count=available_count, sold_count=sold_count,
                      other_count=other_count, counter_info=json.dumps(counter, ensure_ascii=False))
     doc.save()
+    return doc
 
 
 async def main():
@@ -264,8 +277,10 @@ async def main():
     await decryptor.init_browser()
 
     for name in ["保利和颂", "保利天府瑧悦花园", "锦粼观邸", "阅天府", "越秀曦悦府", "人居越秀和樾林语花园", "人居越秀鹿溪樾府小区"]:
-        total_counter = await get_counter(decryptor, name)
-        insert_mongo_total(name, total_counter)
+        total_counter, single_counters = await get_counter(decryptor, name)
+        total_doc = insert_mongo_total(name, total_counter)
+        for item in single_counters:
+            insert_mongo_single(name, item[0], item[1]["house_number"], item[1]["unit_number"], item[1]["info"], total_doc)
 
 
 if __name__ == '__main__':
