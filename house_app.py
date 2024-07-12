@@ -276,7 +276,7 @@ async def main():
     decryptor = AsyncWebReq()
     await decryptor.init_browser()
 
-    for name in ["保利和颂", "保利天府和颂花园", "邦泰天府云景花园", "保利天府瑧悦花园", "锦粼观邸", "阅天府", "越秀曦悦府", "人居越秀和樾林语花园", "人居越秀鹿溪樾府小区", "缦云小区"]:
+    for name in ["保利和颂", "保利天府和颂花园", "邦泰天府云景花园", "保利天府瑧悦花园", "锦粼观邸", "阅天府", "越秀曦悦府", "人居越秀和樾林语花园", "人居越秀鹿溪樾府小区", "缦云小区", "川发天府上城"]:
         total_counter, single_counters = await get_counter(decryptor, name)
         total_doc = insert_mongo_total(name, total_counter)
         for item in single_counters:
