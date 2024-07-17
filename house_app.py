@@ -84,7 +84,7 @@ def get_hno_and_unos(token):
     return hno_and_uno
 
 
-def get_entry_params(name, excluded_types=["商业", "车位", "机动车位"]):
+def get_entry_params(name, excluded_types=["商业", "车位", "机动车位", "公寓"], need_types=["住宅"]):
     response = requests.get(ENTRY_URL, headers=headers)
     if response.status_code == 200:
         html_content = response.text
