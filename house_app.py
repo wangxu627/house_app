@@ -84,7 +84,7 @@ def get_hno_and_unos(token):
     return hno_and_uno
 
 
-def get_entry_params(name, excluded_types=["商业", "车位"]):
+def get_entry_params(name, excluded_types=["商业", "车位", "机动车位"]):
     response = requests.get(ENTRY_URL, headers=headers)
     if response.status_code == 200:
         html_content = response.text
@@ -110,7 +110,10 @@ def get_entry_params(name, excluded_types=["商业", "车位"]):
                     release_date = cells[7].get_text(strip=True)
                     second_last_td = cells[-2]
                     link_tag = second_last_td.find('a')
-                    if link_tag and type_td_text not in excluded_types:
+                    s1 = set(type_td_text.split("、"))
+                    s2 = set(excluded_types)
+                    s3 = set(need_types)
+                    if link_tag and len(s3.intersection(s1 - s2)) > 0:
                         link = link_tag.get('href')
                         parsed_url = urlparse(link)
                         query_params = parsed_url.query
