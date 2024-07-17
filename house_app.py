@@ -11,6 +11,7 @@ from pypinyin import pinyin, Style
 from mongoengine import connect, Document, IntField, StringField, DateTimeField, FloatField, DynamicField, ReferenceField
 
 MONGODB_URI = "mongodb://rabbitlbj:wx*123456789@router.wxioi.fun:27017/?retryWrites=true&loadBalanced=false&serverSelectionTimeoutMS=5000&connectTimeoutMS=10000&authSource=admin&authMechanism=SCRAM-SHA-256"
+MONGODB_DATABASE = "available_house"
 ENTRY_URL = "https://zw.cdzjryb.com/zwdt/SCXX/Default.aspx?action=ucSCXXShowNew"
 FLOOR_ESTATE_OF_VIEWS_URL = "https://zw.cdzjryb.com/house-one2one/one2one/getFloorEstateOfViews"
 HNO_AND_UNO_URL = "https://zw.cdzjryb.com/house-one2one/one2one/getHnoAndUnos"
@@ -46,6 +47,13 @@ class SingleCount(Document):
     created_date = DateTimeField(default=datetime.datetime.utcnow)
     total_ref = ReferenceField(TotalCount)
 
+
+def is_valid_datetime(date_string, date_format="%Y-%m-%d"):
+    try:
+        datetime.datetime.strptime(date_string, date_format)
+        return True
+    except ValueError:
+        return False
 
 def chinese_to_pinyin(text):
     pinyin_list = pinyin(text, style=Style.NORMAL)
@@ -108,6 +116,12 @@ def get_entry_params(name, excluded_types=["商业", "车位", "机动车位", "
                     type_td_text = cells[4].get_text(strip=True)
                     area = cells[6].get_text(strip=True)
                     release_date = cells[7].get_text(strip=True)
+                    if not is_valid_datetime(release_date):
+                        if release_date == "现房":
+                            release_date = "2999-01-01"
+                        else:
+                            release_date = "1970-01-01"
+                    type_td_text = cells[4].get_text(strip=True)
                     second_last_td = cells[-2]
                     link_tag = second_last_td.find('a')
                     s1 = set(type_td_text.split("、"))
@@ -240,12 +254,13 @@ async def get_counter(decryptor, name):
 
 
 def insert_mongo_single(name, counter, hall_number, unit_number, info, total_ref):
-    connect(host=MONGODB_URI, db="available_house")
+    connect(host=MONGODB_URI, db=MONGODB_DATABASE)
 
     excluded_elements = {'已售', '可售'}
     available_count = counter["可售"]
     sold_count = counter["已售"]
     other_count = sum(count for item, count in counter.items() if item not in excluded_elements)
+
     doc = SingleCount(name=name,
                       pinyin_name=chinese_to_pinyin(name),
                       available_count=available_count,
@@ -263,7 +278,7 @@ def insert_mongo_single(name, counter, hall_number, unit_number, info, total_ref
 
 
 def insert_mongo_total(name, counter):
-    connect(host=MONGODB_URI, db="available_house")
+    connect(host=MONGODB_URI, db=MONGODB_DATABASE)
 
     excluded_elements = {'已售', '可售'}
     available_count = counter["可售"]
