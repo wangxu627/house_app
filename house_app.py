@@ -1,4 +1,5 @@
 import json
+import re
 import asyncio
 import datetime
 from urllib.parse import urlparse, parse_qs
@@ -124,7 +125,7 @@ def get_entry_params(name, excluded_types=["商业", "车位", "机动车位", "
                     type_td_text = cells[4].get_text(strip=True)
                     second_last_td = cells[-2]
                     link_tag = second_last_td.find('a')
-                    s1 = set(type_td_text.split("、"))
+                    s1 = set(re.split("[、，]", type_td_text))
                     s2 = set(excluded_types)
                     s3 = set(need_types)
                     if link_tag and len(s3.intersection(s1 - s2)) > 0:
